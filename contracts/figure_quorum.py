@@ -24,10 +24,15 @@ import re
 # Other contracts plug this in wherever a trustworthy number has to be distilled
 # from messy human reports: ESG/KPI disclosures, lab or field measurements,
 # audited metrics, insurance loss figures. It is a primitive, not a demo.
+#
+# Lifecycle and access control: the deployer is recorded as owner and only the
+# owner may open rounds, so an arbitrary caller cannot preempt a period label or
+# flood the round history. The round log is append-only and unbounded (no fixed
+# capacity to exhaust). Unit conversion is exact: a quantity that does not fold
+# to a whole number of base units is rejected rather than silently floored.
 
 MIN_SOURCES = 3
 MAX_SOURCES = 7
-MAX_ROUNDS = 16
 MAX_DOCUMENT_BYTES = 6000
 
 # Integer scale tables. Each family folds to a small base unit so that every
@@ -47,6 +52,13 @@ def _reject(message: str):
     raise gl.vm.UserError(message)
 
 
+def _addr_str(a) -> str:
+    try:
+        return a.as_hex
+    except Exception:
+        return str(a)
+
+
 def _canonical(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
@@ -62,7 +74,12 @@ def _to_base(value: str, unit: str, family: str) -> int:
     whole, dot, frac = value.partition(".")
     numerator = int(whole + frac)
     denominator = 10 ** len(frac) if dot else 1
-    return numerator * table[unit] // denominator
+    scaled = numerator * table[unit]
+    # Reject quantities finer than the base unit instead of silently flooring
+    # them away: only an exact whole number of base units is accepted.
+    if scaled % denominator != 0:
+        _reject("[LLM_ERROR] Value is finer than the base unit; not an exact base-unit amount")
+    return scaled // denominator
 
 
 def _read_sources(raw, repo: str, period: str) -> list:
@@ -163,6 +180,7 @@ def _fold(period: str, subject: str, family: str, readings: dict) -> dict:
 
 
 class Contract(gl.Contract):
+    owner: str
     source_repo: str
     subject: str
     metric: str
@@ -179,6 +197,7 @@ class Contract(gl.Contract):
             _reject("[EXPECTED] Metric description must be 4..160 chars")
         if family not in UNIT_SCALES:
             _reject("[EXPECTED] family must be length, mass or volume")
+        self.owner = _addr_str(gl.message.sender_address)
         self.source_repo = source_repo
         self.subject = subject
         self.metric = metric
@@ -186,12 +205,12 @@ class Contract(gl.Contract):
 
     @gl.public.write
     def open_round(self, period: str, sources_json: str) -> None:
+        if _addr_str(gl.message.sender_address) != self.owner:
+            _reject("[EXPECTED] Only the owner may open a round")
         if not isinstance(period, str) or not PERIOD_RE.fullmatch(period):
             _reject("[EXPECTED] period must be a slug [a-z0-9-], up to 40 chars")
         if period in self.seen:
             _reject("[EXPECTED] period already recorded")
-        if len(self.rounds) >= MAX_ROUNDS:
-            _reject("[EXPECTED] Round limit reached")
         sources = _read_sources(sources_json, self.source_repo, period)
 
         subject = self.subject
@@ -311,6 +330,7 @@ class Contract(gl.Contract):
     @gl.public.view
     def get_state(self) -> dict:
         return {
+            "owner": self.owner,
             "source_repo": self.source_repo,
             "subject": self.subject,
             "metric": self.metric,

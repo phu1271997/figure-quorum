@@ -36,6 +36,20 @@ def test_to_base_rejects_bad_grammar():
         fq._to_base("5", "in", "length")          # unit not in family
 
 
+def test_to_base_rejects_finer_than_base_unit():
+    # The base unit is the smallest; a quantity that does not fold to a whole
+    # number of base units must be rejected, never silently floored.
+    with pytest.raises(UE):
+        fq._to_base("5.5", "um", "length")        # 5.5 um is not a whole um
+    with pytest.raises(UE):
+        fq._to_base("2.5", "mg", "mass")          # 2.5 mg is not a whole mg
+    with pytest.raises(UE):
+        fq._to_base("0.001", "um", "length")      # finer than base, rejected
+    # Exact sub-unit quantities still convert losslessly.
+    assert fq._to_base("0.5", "mm", "length") == 500    # 0.5 mm = 500 um exactly
+    assert fq._to_base("2.5", "cm", "length") == 25000
+
+
 def _readings(values_units):
     rows = []
     for i, vu in enumerate(values_units):
@@ -94,3 +108,11 @@ def test_parse_readings_requires_verbatim_quote():
                      "quote": "a quote that is not in the source document"}]}
     with pytest.raises(UE):
         fq._parse_readings(bad, docs, "length")
+
+
+def test_constructor_records_deployer_as_owner():
+    # The deployer (gl.message.sender_address) is pinned as the sole writer.
+    fq.gl.message.sender_address = fq.gl.message.sender_address.__class__("0x" + "a" * 40)
+    c = fq.Contract.__new__(fq.Contract)
+    fq.Contract.__init__(c, REPO, "subj", "observed daily rainfall total", "length")
+    assert c.owner == "0x" + "a" * 40

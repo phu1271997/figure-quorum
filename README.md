@@ -4,9 +4,10 @@ A standalone **GenLayer Intelligent Contract primitive** that turns several
 independently published prose reports into one **unit-exact number** the whole
 validator set agrees on.
 
-A caller opens a round with 3..7 source documents. Each document is pinned to a
-GitHub commit and a SHA-256 digest. Every validator fetches the same bytes,
-confirms the hash, and asks its own LLM to read each document and lift out the
+The contract owner (the deployer) opens a round with 3..7 source documents. Each
+document is pinned to a GitHub commit and a SHA-256 digest. Every validator
+fetches the same bytes, confirms the hash, and asks its own LLM to read each
+document and lift out the
 figure for a named metric, with a verbatim supporting quote. The contract then
 folds the readings **deterministically** - exact integer unit conversion, a
 median-absolute-deviation (MAD) outlier filter, and a trimmed mean - and stores
@@ -30,9 +31,18 @@ the round on chain.
   nodes that would read a source differently do **not** agree; a reading that
   merely has the right JSON keys does not pass.
 
+## Access control and lifecycle
+
+- **Owner-gated writes.** The deployer is recorded as `owner`; only the owner may
+  call `open_round`. An arbitrary caller cannot preempt a `period` label or flood
+  the round history.
+- **Unbounded, append-only log.** Rounds accrue in a `DynArray` with no fixed
+  capacity to exhaust; each `period` slug is still single-use so a labelled round
+  cannot be replayed.
+
 ## How consensus works
 
-1. A caller opens a round with 3..7 sources. Each is `{id, url, sha256}` and the
+1. The owner opens a round with 3..7 sources. Each is `{id, url, sha256}` and the
    `url` must be a commit-pinned raw GitHub file inside the fixed `source_repo`,
    under `datasets/<period>/...md`.
 2. **Leader** fetches each document, verifies size and `sha256`, then asks its
@@ -50,7 +60,7 @@ the round on chain.
 
 ## Public API
 
-- `open_round(period: str, sources_json: str)` - run a new round.
+- `open_round(period: str, sources_json: str)` - run a new round (owner only).
 - `get_latest() -> dict`
 - `get_round(index: int) -> dict`
 - `get_round_by_period(period: str) -> dict`
@@ -79,12 +89,16 @@ Integer-exact conversion, no floats on chain:
 | mass | t, kg, g, mg | milligram (mg) |
 | volume | kl, l, ml, ul | microlitre (ul) |
 
+A reading only converts when it folds to a whole number of base units. A
+quantity finer than the base unit (e.g. `5.5 um`, base `um`) is **rejected**, not
+silently floored, so no precision is ever lost in the fold.
+
 ## Deployed on Studionet
 
-- Address: `0xeC8A46C5F3645f756c333fFb776410820207424D`
+- Address: `0x6cb85d252C2f88E7A95494b45382361d69f77562`
 - source_repo: `phu1271997/figure-quorum`
 - Network: GenLayer Studionet (chain id `61999`, RPC `https://studio.genlayer.com/api`)
-- Explorer: <https://explorer-studio.genlayer.com/address/0xeC8A46C5F3645f756c333fFb776410820207424D>
+- Explorer: <https://explorer-studio.genlayer.com/address/0x6cb85d252C2f88E7A95494b45382361d69f77562>
 
 ## Develop
 

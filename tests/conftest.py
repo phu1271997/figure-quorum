@@ -67,10 +67,27 @@ class _Nondet:
         raise RuntimeError("LLM access is on-chain only")
 
 
+class _Address:
+    """Minimal stand-in for genlayer Address with the as_hex property."""
+
+    def __init__(self, hexstr):
+        self._hex = hexstr
+
+    @property
+    def as_hex(self):
+        return self._hex
+
+
+class _Message:
+    # Tests may override sender_address to simulate different callers.
+    sender_address = _Address("0x" + "0" * 40)
+
+
 class _Gl:
     public = _Public
     vm = _Vm
     nondet = _Nondet
+    message = _Message
 
     class Contract:
         pass
@@ -89,6 +106,7 @@ def _allow_storage(cls):
 
 
 genlayer.allow_storage = _allow_storage
+genlayer.Address = _Address
 # `from genlayer import *` pulls these names.
 genlayer.__all__ = ["gl", "TreeMap", "DynArray", "Address", "bigint", "allow_storage"]
 

@@ -35,8 +35,11 @@ the answer trustworthy:
 
 - Exact integer unit conversion via per-family scale tables (length to
   micrometre, mass to milligram, volume to microlitre). No floats ever touch
-  chain state; a decimal string is folded as
-  `int(whole+frac) * scale // 10**len(frac)`.
+  chain state; a decimal string folds to `int(whole+frac) * scale /
+  10**len(frac)`. The division must be exact: if the quantity does not land on a
+  whole number of base units it is **rejected** (`UserError`), never floored. A
+  value finer than the base unit therefore fails loudly instead of silently
+  losing precision, so every stored figure is lossless.
 - Outlier rejection uses the **median absolute deviation**: centre on the
   median, drop any reading more than `3 * MAD` from it (with a small relative
   floor so a zero MAD does not reject everything), then report the **trimmed
@@ -44,12 +47,18 @@ the answer trustworthy:
   needs no per-metric tuning.
 - `status` is `READY` only with >= 3 surviving inliers, else `INSUFFICIENT`.
 
-## State lifecycle
+## Access control and state lifecycle
 
-- Rounds are append-only canonical-JSON entries in a `DynArray[str]`.
+- **Owner-gated.** The deployer is recorded as `owner` in the constructor
+  (`gl.message.sender_address`) and only the owner may call `open_round`. This
+  closes two griefing vectors a public writer would otherwise open: an arbitrary
+  caller preempting (squatting) a `period` label, and an arbitrary caller
+  flooding the round history.
+- Rounds are append-only canonical-JSON entries in a `DynArray[str]`. The log is
+  **unbounded** - there is no fixed round capacity for a caller to exhaust; growth
+  is governed by the owner and ordinary gas limits.
 - A `TreeMap[str, str]` maps each period slug to its round index and enforces
   single-use, so the same labelled round cannot be replayed.
-- `MAX_ROUNDS` bounds storage growth.
 - Views return the folded outcome plus the full source and reading record, so a
   downstream contract can both trust the headline and re-audit the inputs.
 
